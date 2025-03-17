@@ -49,19 +49,33 @@ def address_to_seed(address):
         raise ValueError(f"Invalid Ethereum address: {e}")
 
 try:
-    print(f"Run {run_idx}: Clearing GPU memory before loading model with {n} GPU(s)...")
+    if n > 0:
+        print(f"Run {run_idx}: Clearing GPU memory before loading model with {n} GPU(s)...")
+        torch.cuda.empty_cache()
+    else:
+        print(f"Run {run_idx}: Preparing to load model on CPU...")
     gc.collect()
-    torch.cuda.empty_cache()
 
-    print(f"Run {run_idx}: Loading model with {n} GPU(s)...")
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype="auto",
-        device_map="auto",
-        max_memory=max_memory
-    )
-    print(f"Run {run_idx}: Model loaded successfully with {n} GPU(s).")
-
+    if n > 0:
+        print(f"Run {run_idx}: Loading model with {n} GPU(s)...")
+        num_gpus = torch.cuda.device_count()
+        total_memory = {i: torch.cuda.get_device_properties(i).total_memory for i in range(num_gpus)}
+        max_memory = {i: total_memory[i] if i < n else 0 for i in range(num_gpus)}
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype="auto",
+            device_map="auto",
+            max_memory=max_memory
+        )
+    else:
+        print(f"Run {run_idx}: Loading model on CPU...")
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype="auto",
+            device_map="cpu"
+        )
+    print(f"Run {run_idx}: Model loaded successfully{' with ' + str(n) + ' GPU(s)' if n > 0 else ' on CPU'}.")
+    
     # Set seed for reproducibility using the Ethereum address
     seed = address_to_seed(address)
     torch.manual_seed(seed)
