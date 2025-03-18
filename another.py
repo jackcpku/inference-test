@@ -4,12 +4,15 @@ import gc
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
+torch.cuda.empty_cache()
+gc.collect()
+
 # Set environment variable to reduce memory fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 # Configuration: Manually set seed and temperature
-seed = 3407  # Seed for reproducibility
-temperature = 1.5  # Temperature for controlling randomness (lower = less random)
+seed = 3410  # Seed for reproducibility
+temperature = 0.1  # Temperature for controlling randomness (lower = less random)
 prompt = "How many r's are in the word \"strawberry\"?"  # Test prompt
 
 # Set the seed for reproducibility across CPU and all GPUs
@@ -24,8 +27,6 @@ print("Loading tokenizer...")
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 print("Tokenizer loaded.")
 
-torch.cuda.empty_cache()
-gc.collect()
 
 # Load the model, distributing it across available GPUs
 print("Loading model...")
@@ -54,7 +55,7 @@ model_inputs = tokenizer(text, return_tensors="pt").to(next(model.parameters()).
 # Define generation parameters
 max_new_tokens = 64  # Maximum number of new tokens to generate
 top_k = 40  # Top-k sampling
-top_p = 0.9999  # Top-p (nucleus) sampling
+top_p = 0.95  # Top-p (nucleus) sampling
 repetition_penalty = 1.1  # Penalty to reduce repetition
 
 # Generate the response with detailed output

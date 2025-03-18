@@ -79,7 +79,7 @@ try:
     # Set seed for reproducibility using the Ethereum address
     seed = address_to_seed(address)
     torch.manual_seed(seed)
-    temperature = 1.5  # Temperature for softmax sampling
+    temperature = 0.1  # Temperature for softmax sampling
 
     # Prepare input tensors
     model_inputs = tokenizer(text, return_tensors="pt").to(next(model.parameters()).device)
@@ -87,7 +87,7 @@ try:
     attention_mask = model_inputs["attention_mask"]
     generated_ids = input_ids.clone()
 
-    max_new_tokens = 100
+    max_new_tokens = 64
     eos_token_id = tokenizer.eos_token_id
 
     # Manual generation loop
@@ -111,7 +111,7 @@ try:
         )
 
         # Print top-5 logits and tokens with probabilities
-        top_k = 5
+        top_k = 20
         top_logits, top_indices = torch.topk(logits, k=top_k, dim=-1)
         top_probs = probs[0, top_indices[0]].tolist()
         print(f"Run {run_idx}, Step {step} (with {n} GPUs): Top {top_k} tokens:")
