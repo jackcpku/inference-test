@@ -78,20 +78,20 @@ def main():
     print(f"Number of hidden states: {len(hidden_states)}")
     print(f"Number of generated tokens: {len(generated_ids)}")
 
-    # Print top 5 logits for each step
+    # Print top 5 logits for each step (already top-20 in your code)
     for step, hidden_state in enumerate(hidden_states):
-        # Handle different hidden state shapes
+        print(f"Step {step}: Shape of hidden_state: {hidden_state.shape}")
         if hidden_state.dim() == 1:
             hs = hidden_state  # Shape: [hidden_size]
         elif hidden_state.dim() == 2:
-            hs = hidden_state[-1, :]  # Take last layer, Shape: [hidden_size]
+            hs = hidden_state[-1, :]  # Shape: [hidden_size]
         else:
             raise ValueError(f"Unexpected hidden_state shape: {hidden_state.shape}")
         
         # Compute logits
-        logits = hs @ output_weight.T  # [hidden_size] @ [hidden_size, vocab_size] -> [vocab_size]
+        logits = hs @ output_weight.T  # Shape: [vocab_size]
         
-        # Get top 5 predictions
+        # Get top 20 predictions (k=20 as in your code)
         top5_values, top5_indices = torch.topk(logits, 20)
         top5_tokens = [tokenizer.decode([idx]) for idx in top5_indices.tolist()]
         
@@ -102,11 +102,8 @@ def main():
         # Print results
         print(f"\nStep {step}:")
         print(f"  Actual token: '{actual_token}'")
-        print(f"  Top 5 candidates: {top5_tokens}")
-        print(f"  Top 5 logits: {top5_values.tolist()}")
-        # Print full output
-        print("\nEntire output:")
-        print(generated_text)
+        print(f"  Top 20 candidates: {top5_tokens}")
+        print(f"  Top 20 logits: {top5_values.tolist()}")
 
     # Shutdown
     llm.shutdown()
