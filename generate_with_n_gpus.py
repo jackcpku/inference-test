@@ -17,38 +17,39 @@ address = sys.argv[3]  # Ethereum address as seed (e.g., "0x95222290dd7278aa3ddd
 model_name = "Qwen/QwQ-32B"
 prompt = "How many r's are in the word \"strawberry\"?"
 
+# Load tokenizer and compute token mapping
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokens = [tokenizer.convert_ids_to_tokens(i) for i in range(tokenizer.vocab_size)]
+
+# Prepare input text using chat template
 text = tokenizer.apply_chat_template(
     [{"role": "user", "content": prompt}],
     tokenize=False,
     add_generation_prompt=True
 )
+
+# Configure device mapping based on number of GPUs
 num_gpus = torch.cuda.device_count()
 total_memory = {i: torch.cuda.get_device_properties(i).total_memory for i in range(num_gpus)}
 max_memory = {i: total_memory[i] if i < n else 0 for i in range(num_gpus)}
-
-# Manually specify device map to balance memory usage
 device_map = {i: f"{i*100//n}-{(i+1)*100//n}%" for i in range(n)}
 
 # Function to convert Ethereum address to integer seed
 def address_to_seed(address):
-    # Clean the address: remove "0x" and convert to lowercase for consistency
     if address.startswith("0x"):
         address = address[2:].lower()
     else:
         address = address.lower()
-    
     try:
-        # Compute SHA-256 hash of the address string
         hash_obj = hashlib.sha256(address.encode('utf-8'))
-        hash_bytes = hash_obj.digest()  # Get 32 bytes (256 bits)
-        # Take the first 8 bytes (64 bits) and convert to an integer
-        seed = int.from_bytes(hash_bytes[:8], 'big')  # 'big' for big-endian
+        hash_bytes = hash_obj.digest()
+        seed = int.from_bytes(hash_bytes[:8], 'big')
         return seed
     except Exception as e:
         raise ValueError(f"Invalid Ethereum address: {e}")
 
 try:
+    # Clear memory before loading model
     if n > 0:
         print(f"Run {run_idx}: Clearing GPU memory before loading model with {n} GPU(s)...")
         torch.cuda.empty_cache()
@@ -56,11 +57,9 @@ try:
         print(f"Run {run_idx}: Preparing to load model on CPU...")
     gc.collect()
 
+    # Load model
     if n > 0:
         print(f"Run {run_idx}: Loading model with {n} GPU(s)...")
-        num_gpus = torch.cuda.device_count()
-        total_memory = {i: torch.cuda.get_device_properties(i).total_memory for i in range(num_gpus)}
-        max_memory = {i: total_memory[i] if i < n else 0 for i in range(num_gpus)}
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype="auto",
@@ -75,11 +74,11 @@ try:
             device_map="cpu"
         )
     print(f"Run {run_idx}: Model loaded successfully{' with ' + str(n) + ' GPU(s)' if n > 0 else ' on CPU'}.")
-    
-    # Set seed for reproducibility using the Ethereum address
+
+    # Set seed for reproducibility
     seed = address_to_seed(address)
     torch.manual_seed(seed)
-    temperature = 0.1  # Temperature for softmax sampling
+    temperature = 0.1
 
     # Prepare input tensors
     model_inputs = tokenizer(text, return_tensors="pt").to(next(model.parameters()).device)
@@ -87,30 +86,41 @@ try:
     attention_mask = model_inputs["attention_mask"]
     generated_ids = input_ids.clone()
 
-    max_new_tokens = 64
+    max_new_tokens = 100
     eos_token_id = tokenizer.eos_token_id
+
+    # Initialize list to store generation data
+    steps = []
 
     # Manual generation loop
     for step in range(max_new_tokens):
-        # Forward pass to get logits
+        # Compute logits
         outputs = model(input_ids=generated_ids, attention_mask=attention_mask)
-        logits = outputs.logits[:, -1, :]  # Logits for the next token (1, vocab_size)
-        
-        # Probabilistic sampling: convert logits to probabilities and sample
+        logits = outputs.logits[:, -1, :]  # Shape: (1, vocab_size)
+
+        # Store logits for this step
+        steps.append({
+            "logits": logits[0].tolist(),  # Convert to list
+            "selected_token_id": None  # Placeholder
+        })
+
+        # Sample next token
         probs = torch.softmax(logits / temperature, dim=-1)
-        next_token = torch.multinomial(probs, num_samples=1)  # (1, 1)
+        next_token = torch.multinomial(probs, num_samples=1)  # Shape: (1, 1)
         selected_token_id = next_token.item()
+        steps[-1]["selected_token_id"] = selected_token_id  # Update selected token ID
+
         selected_logit = logits[0, selected_token_id].item()
         selected_prob = probs[0, selected_token_id].item()
 
-        # Append the selected token
+        # Update generated sequence
         generated_ids = torch.cat([generated_ids, next_token], dim=1)
         attention_mask = torch.cat(
             [attention_mask, torch.ones((1, 1), device=attention_mask.device)],
             dim=1
         )
 
-        # Print top-5 logits and tokens with probabilities
+        # Print top-k tokens
         top_k = 20
         top_logits, top_indices = torch.topk(logits, k=top_k, dim=-1)
         top_probs = probs[0, top_indices[0]].tolist()
@@ -130,12 +140,23 @@ try:
             selected_token = tokenizer.decode([selected_token_id])
             print(f"  Selected: {selected_token} (id: {selected_token_id}, logit: {selected_logit:.4f}, prob: {selected_prob:.4f})")
 
-        # Stop if EOS token is generated
+        # Check for EOS token
         if selected_token_id == eos_token_id:
             print(f"Run {run_idx}: EOS token generated at step {step} with {n} GPUs")
             break
 
-    # Decode and save the generated text
+    # Save generation data to JSON
+    logits_file = f"logits_{n}_run{run_idx}.json"
+    data = {
+        "vocab_size": tokenizer.vocab_size,
+        "tokens": tokens,
+        "steps": steps
+    }
+    with open(logits_file, "w") as f:
+        json.dump(data, f)
+    print(f"Run {run_idx}: Logits data saved to {logits_file}")
+
+    # Save generated text
     generated_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
     result = {"generated_text": generated_text}
     output_file = f"results_{n}_run{run_idx}.json"
@@ -150,7 +171,7 @@ except Exception as e:
     print(f"Run {run_idx}: Error with {n} GPUs: {str(e)}")
 
 finally:
-    # Clean up to free memory
+    # Clean up memory
     if "model" in locals():
         del model
     if "model_inputs" in locals():
